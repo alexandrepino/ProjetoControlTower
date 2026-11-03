@@ -1,0 +1,79 @@
+# vertice_farol · a Torre de Controle inteira, toda segunda às 6h (America/Sao_Paulo).
+#
+#  ingestao_feriados ──┐
+#                      ├── conferencia_bronze ── medalhao ──┬── testes_de_qualidade
+#  ingestao_data_lake ─┘                                    └── status_com_ia
+#
+#  1 ingestao_feriados    notebook imersao_claude/ingestao_api: grava bronze.feriados (BrasilAPI)
+#  2 ingestao_data_lake   notebook imersao_claude/ingestao_s3: baixa os arquivos do data lake
+#                         (Supabase Storage, boto3) e recria as 9 tabelas da bronze
+#  3 conferencia_bronze   confere a contagem das 9 tabelas da bronze (seed 42)
+#  4 medalhao             pipeline vertice_medalhao: silver (7 tabelas) e gold (3 tabelas)
+#  5 testes_de_qualidade  10 testes que quebram o job se o dado estiver errado
+#  6 status_com_ia        o texto do status semanal vira coluna (regra, palavra-chave e IA),
+#                         acumulando em gold.status_estruturado
+#
+# No target dev o agendamento fica pausado pelo preset trigger_pause_status.
+# As chaves do data lake vêm de variáveis: o valor fica em
+# .databricks/bundle/dev/variable-overrides.json, fora do Git.
+resources:
+  jobs:
+    vertice_farol:
+      name: vertice_farol
+
+      # Duas execuções ao mesmo tempo apagariam a bronze uma da outra.
+      max_concurrent_runs: 1
+
+      schedule:
+        quartz_cron_expression: "0 0 6 ? * MON"
+        timezone_id: America/Sao_Paulo
+
+      tasks:
+        - task_key: ingestao_feriados
+          notebook_task:
+            notebook_path: /Workspace/Users/criolocinza@gmail.com/imersao_claude/ingestao_api
+            source: WORKSPACE
+
+        - task_key: ingestao_data_lake
+          notebook_task:
+            notebook_path: /Workspace/Users/criolocinza@gmail.com/imersao_claude/ingestao_s3
+            source: WORKSPACE
+            base_parameters:
+              S3_ENDPOINT: ${var.s3_endpoint}
+              S3_REGION: ${var.s3_region}
+              S3_BUCKET: ${var.s3_bucket}
+              RAW: ${var.s3_raw}
+              ACCESS_KEY: ${var.s3_access_key}
+              SECRET_KEY: ${var.s3_secret_key}
+
+        - task_key: conferencia_bronze
+          depends_on:
+            - task_key: ingestao_feriados
+            - task_key: ingestao_data_lake
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/conferencia/00-conferencia-bronze.sql
+
+        - task_key: medalhao
+          depends_on:
+            - task_key: conferencia_bronze
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.vertice_medalhao.id}
+
+        # Melhor o dashboard com o dado da semana passada do que com o dado errado de hoje.
+        - task_key: testes_de_qualidade
+          depends_on:
+            - task_key: medalhao
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/testes/testes.sql
+
+        - task_key: status_com_ia
+          depends_on:
+            - task_key: medalhao
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/ia/status_estruturado.sql

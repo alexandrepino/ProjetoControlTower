@@ -1,0 +1,54 @@
+# This is a Declarative Automation Bundle definition for vertice.
+# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+bundle:
+  name: vertice
+  uuid: 9fabe1de-7d90-4e3f-926a-607a284b17c4
+
+include:
+  - resources/*.yml
+
+# As skills do Claude Code não precisam ir para o workspace.
+sync:
+  exclude:
+    - .claude/**
+
+variables:
+  catalog:
+    description: Catálogo do projeto (bronze, silver e gold)
+    default: lakehouse_vertice
+  warehouse_id:
+    description: SQL warehouse das sql_task (Serverless Starter Warehouse)
+    default: 3b766d760f4c2e8c
+  # Conexão com o data lake (Supabase Storage). Sem default: o valor fica em
+  # .databricks/bundle/<target>/variable-overrides.json, fora do Git.
+  s3_endpoint:
+    description: Endpoint S3 do Supabase Storage
+  s3_region:
+    description: Região do bucket
+  s3_bucket:
+    description: Bucket do data lake
+  s3_raw:
+    description: Volume onde os arquivos baixados pousam
+  s3_access_key:
+    description: Chave de acesso do data lake
+  s3_secret_key:
+    description: Segredo da chave de acesso do data lake
+
+targets:
+  dev:
+    # Sem mode: development (ele prefixa os nomes com [dev usuario]).
+    # Agendamentos e gatilhos sobem pausados.
+    default: true
+    presets:
+      trigger_pause_status: PAUSED
+    workspace:
+      host: https://dbc-625a1d68-a290.cloud.databricks.com
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-625a1d68-a290.cloud.databricks.com
+      # We explicitly deploy to /Workspace/Users/criolocinza@gmail.com to make sure we only have a single copy.
+      root_path: /Workspace/Users/criolocinza@gmail.com/.bundle/${bundle.name}/${bundle.target}
+    permissions:
+      - user_name: criolocinza@gmail.com
+        level: CAN_MANAGE
